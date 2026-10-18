@@ -139,9 +139,10 @@
     'Ghast', 'Piglin', 'Hoglin', 'Drowned', 'Phantom', 'Pillager', 'Ravager', 'Vindicator',
     'Evoker', 'Warden', 'Wither', 'Enderdragon', 'Cow', 'Pig', 'Sheep', 'Chicken',
     'Horse', 'Wolf', 'Cat', 'Fox', 'Axolotl', 'Villager', 'Golem', 'Bee',
-    'Panda', 'Turtle', 'Dolphin', 'Squid', 'Bat', 'Llama', 'Parrot', 'Allay'
+    'Panda', 'Turtle', 'Dolphin', 'Squid', 'Bat', 'Llama', 'Parrot', 'Allay',
+    'Cod'
   ];
-  const REFRESH_MS = 5 * 60 * 1000; // API caches results for 5 minutes
+  const REFRESH_MS = 2 * 60 * 1000;
 
   const $ = (id) => document.getElementById(id);
   let nextCheck = 0;
@@ -199,7 +200,7 @@
     }
 
     $('summary').replaceChildren(
-      el('span', 'count', servers.length + ' / ' + NAMES.length),
+      el('span', 'count', String(servers.length)),
       document.createTextNode(' online')
     );
 
@@ -212,13 +213,12 @@
     const results = await Promise.allSettled(NAMES.map(check));
     const servers = results
       .filter(r => r.status === 'fulfilled' && r.value)
-      .map(r => r.value); // keeps list order
+      .map(r => r.value);
     const failures = results.filter(r => r.status === 'rejected').length;
 
     render(servers, failures);
     lastChecked = new Date();
 
-    // If everything failed, retry sooner
     const wait = failures === NAMES.length ? 30 * 1000 : REFRESH_MS;
     nextCheck = Date.now() + wait;
     setTimeout(refresh, wait);
