@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ProgSoc MC Servers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #111312;
+    --panel: #1b1f1c;
+    --tile: #1f6f3a;
+    --tile-edge: #2e9b52;
+    --text: #f2f5f3;
+    --muted: #8f9a93;
+    --accent: #5fe08a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    padding: clamp(16px, 3vw, 40px);
+    gap: clamp(16px, 2.5vw, 32px);
+  }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 24px;
+  }
+  h1 {
+    font-family: 'Chakra Petch', Inter, system-ui, sans-serif;
+    font-weight: 700;
+    font-size: clamp(24px, 3.6vw, 52px);
+    margin: 0;
+    letter-spacing: 0.02em;
+  }
+  .summary {
+    font-size: clamp(16px, 2vw, 28px);
+    font-weight: 700;
+  }
+  .summary .count { color: var(--accent); }
+
+  main { flex: 1; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(clamp(130px, 14vw, 220px), 1fr));
+    gap: clamp(10px, 1.2vw, 18px);
+  }
+  .tile {
+    background: var(--tile);
+    border: 2px solid var(--tile-edge);
+    border-radius: 12px;
+    padding: clamp(10px, 1.2vw, 18px);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    animation: pop 0.35s ease-out;
+  }
+  .tile img, .tile .noicon {
+    width: clamp(32px, 3.4vw, 52px);
+    height: clamp(32px, 3.4vw, 52px);
+    image-rendering: pixelated;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+  .tile .noicon {
+    background: rgba(0,0,0,0.25);
+    display: grid;
+    place-items: center;
+    font-family: 'Chakra Petch', Inter, system-ui, sans-serif;
+    font-weight: 700;
+    font-size: clamp(16px, 1.8vw, 26px);
+  }
+  .tile .info { min-width: 0; }
+  .tile .name {
+    font-weight: 700;
+    font-size: clamp(15px, 1.5vw, 22px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tile .players {
+    font-size: clamp(12px, 1.1vw, 16px);
+    color: rgba(255,255,255,0.8);
+    margin-top: 2px;
+  }
+  @keyframes pop { from { transform: scale(0.94); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  .message {
+    height: 100%;
+    min-height: 200px;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    font-size: clamp(18px, 2vw, 28px);
+    text-align: center;
+  }
+
+  footer {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: var(--muted);
+    font-size: clamp(12px, 1vw, 15px);
+  }
+  .error { color: #ff8a80; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>ProgSoc Minecraft Servers</h1>
+    <div class="summary" id="summary">Checking servers…</div>
+  </header>
+
+  <main id="main">
+    <div class="message">Checking servers…</div>
+  </main>
+
+  <footer>
+    <span id="note"></span>
+    <span id="updated"></span>
+  </footer>
+
+<script>
+  const DOMAIN = '.mc.progsoc.org';
+  const NAMES = [
+    'Creeper', 'Zombie', 'Skeleton', 'Spider', 'Enderman', 'Witch', 'Slime', 'Blaze',
+    'Ghast', 'Piglin', 'Hoglin', 'Drowned', 'Phantom', 'Pillager', 'Ravager', 'Vindicator',
+    'Evoker', 'Warden', 'Wither', 'Enderdragon', 'Cow', 'Pig', 'Sheep', 'Chicken',
+    'Horse', 'Wolf', 'Cat', 'Fox', 'Axolotl', 'Villager', 'Golem', 'Bee',
+    'Panda', 'Turtle', 'Dolphin', 'Squid', 'Bat', 'Llama', 'Parrot', 'Allay'
+  ];
+  const REFRESH_MS = 5 * 60 * 1000; // API caches results for 5 minutes
+
+  const $ = (id) => document.getElementById(id);
+  let nextCheck = 0;
+  let lastChecked = null;
+
+  async function check(name) {
+    const host = name.toLowerCase() + DOMAIN;
+    const res = await fetch('https://api.mcsrvstat.us/3/' + encodeURIComponent(host), { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    if (!d.online) return null;
+    const p = d.players || {};
+    return {
+      name,
+      icon: typeof d.icon === 'string' && d.icon.startsWith('data:image/') ? d.icon : null,
+      online: typeof p.online === 'number' ? p.online : 0,
+      max: typeof p.max === 'number' ? p.max : '?'
+    };
+  }
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function render(servers, failures) {
+    const main = $('main');
+    main.replaceChildren();
+
+    if (failures === NAMES.length) {
+      main.append(el('div', 'message error', 'Couldn’t reach the status API — will retry shortly.'));
+    } else if (servers.length === 0) {
+      main.append(el('div', 'message', 'No servers online right now'));
+    } else {
+      const grid = el('div', 'grid');
+      for (const s of servers) {
+        const tile = el('div', 'tile');
+        if (s.icon) {
+          const img = el('img');
+          img.src = s.icon;
+          img.alt = '';
+          tile.append(img);
+        } else {
+          tile.append(el('div', 'noicon', s.name[0]));
+        }
+        const info = el('div', 'info');
+        info.append(el('div', 'name', s.name));
+        info.append(el('div', 'players', s.online + ' / ' + s.max + ' players'));
+        tile.append(info);
+        grid.append(tile);
+      }
+      main.append(grid);
+    }
+
+    $('summary').replaceChildren(
+      el('span', 'count', servers.length + ' / ' + NAMES.length),
+      document.createTextNode(' online')
+    );
+
+    $('note').textContent = failures > 0 && failures < NAMES.length
+      ? failures + ' server' + (failures === 1 ? '' : 's') + ' didn’t respond to the status check'
+      : '';
+  }
+
+  async function refresh() {
+    const results = await Promise.allSettled(NAMES.map(check));
+    const servers = results
+      .filter(r => r.status === 'fulfilled' && r.value)
+      .map(r => r.value); // keeps list order
+    const failures = results.filter(r => r.status === 'rejected').length;
+
+    render(servers, failures);
+    lastChecked = new Date();
+
+    // If everything failed, retry sooner
+    const wait = failures === NAMES.length ? 30 * 1000 : REFRESH_MS;
+    nextCheck = Date.now() + wait;
+    setTimeout(refresh, wait);
+    tick();
+  }
+
+  function tick() {
+    if (!lastChecked) return;
+    const secs = Math.max(0, Math.round((nextCheck - Date.now()) / 1000));
+    const m = Math.floor(secs / 60), s = String(secs % 60).padStart(2, '0');
+    $('updated').textContent = 'Last checked ' +
+      lastChecked.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) +
+      ' · next check in ' + m + ':' + s;
+  }
+  setInterval(tick, 1000);
+
+  refresh();
+</script>
+</body>
+</html>
