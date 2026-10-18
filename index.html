@@ -120,11 +120,11 @@
 <body>
   <header>
     <h1>ProgSoc Minecraft Servers</h1>
-    <div class="summary" id="summary">Checking servers…</div>
+    <div class="summary" id="summary"></div>
   </header>
 
   <main id="main">
-    <div class="message">Checking servers…</div>
+    <div class="message">Loading…</div>
   </main>
 
   <footer>
@@ -133,37 +133,11 @@
   </footer>
 
 <script>
-  const DOMAIN = '.mc.progsoc.org';
-  const NAMES = [
-    'Creeper', 'Zombie', 'Skeleton', 'Spider', 'Enderman', 'Witch', 'Slime', 'Blaze',
-    'Ghast', 'Piglin', 'Hoglin', 'Drowned', 'Phantom', 'Pillager', 'Ravager', 'Vindicator',
-    'Evoker', 'Warden', 'Wither', 'Enderdragon', 'Cow', 'Pig', 'Sheep', 'Chicken',
-    'Horse', 'Wolf', 'Cat', 'Fox', 'Axolotl', 'Villager', 'Golem', 'Bee',
-    'Panda', 'Turtle', 'Dolphin', 'Squid', 'Bat', 'Llama', 'Parrot', 'Allay',
-    'Cod'
-  ];
-  const REFRESH_MS = 2 * 60 * 1000;
-  const CONCURRENCY = 5;
+  const POLL_MS = 60 * 1000;
+  const STALE_MIN = 20;
 
   const $ = (id) => document.getElementById(id);
-  let nextCheck = 0;
-  let lastChecked = null;
-  let lastError = '';
-
-  async function check(name) {
-    const host = name.toLowerCase() + DOMAIN;
-    const res = await fetch('https://api.mcsrvstat.us/3/' + encodeURIComponent(host), { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const d = await res.json();
-    if (!d.online) return null;
-    const p = d.players || {};
-    return {
-      name,
-      icon: typeof d.icon === 'string' && d.icon.startsWith('data:image/') ? d.icon : null,
-      online: typeof p.online === 'number' ? p.online : 0,
-      max: typeof p.max === 'number' ? p.max : '?'
-    };
-  }
+  let lastData = null;
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -172,19 +146,18 @@
     return e;
   }
 
-  function render(servers, failures) {
+  function render(data) {
+    const servers = data.servers.filter(s => s.online);
     const main = $('main');
     main.replaceChildren();
 
-    if (failures === NAMES.length) {
-      main.append(el('div', 'message error', 'Couldn’t reach the status API (' + lastError + '). Trying again in a minute.'));
-    } else if (servers.length === 0) {
+    if (servers.length === 0) {
       main.append(el('div', 'message', 'No servers online right now'));
     } else {
       const grid = el('div', 'grid');
       for (const s of servers) {
         const tile = el('div', 'tile');
-        if (s.icon) {
+        if (typeof s.icon === 'string' && s.icon.startsWith('data:image/')) {
           const img = el('img');
           img.src = s.icon;
           img.alt = '';
@@ -194,7 +167,7 @@
         }
         const info = el('div', 'info');
         info.append(el('div', 'name', s.name));
-        info.append(el('div', 'players', s.online + ' / ' + s.max + ' players'));
+        info.append(el('div', 'players', s.players + ' / ' + s.max + ' players'));
         tile.append(info);
         grid.append(tile);
       }
@@ -205,58 +178,42 @@
       el('span', 'count', String(servers.length)),
       document.createTextNode(' online')
     );
-
-    $('note').textContent = failures > 0 && failures < NAMES.length
-      ? failures + ' server' + (failures === 1 ? '' : 's') + ' didn’t respond to the status check (' + lastError + ')'
-      : '';
   }
 
-  async function checkAll() {
-    const results = new Array(NAMES.length);
-    let next = 0;
-    async function worker() {
-      while (next < NAMES.length) {
-        const i = next++;
-        try {
-          results[i] = { status: 'fulfilled', value: await check(NAMES[i]) };
-        } catch (e) {
-          results[i] = { status: 'rejected', reason: e };
-        }
-      }
-    }
-    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-    return results;
+  function updateFooter(fetchFailed) {
+    if (!lastData) return;
+    const checked = new Date(lastData.checked);
+    const ageMin = (Date.now() - checked.getTime()) / 60000;
+    $('updated').textContent = 'Last checked ' +
+      checked.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) +
+      ' · updates about every 5 min';
+    $('note').textContent = fetchFailed
+      ? 'Couldn’t load the latest status, showing the last one'
+      : ageMin > STALE_MIN
+        ? 'Status is ' + Math.round(ageMin) + ' minutes old, the checker may be delayed'
+        : '';
   }
 
   async function refresh() {
-    const results = await checkAll();
-    const servers = results
-      .filter(r => r.status === 'fulfilled' && r.value)
-      .map(r => r.value);
-    const rejected = results.filter(r => r.status === 'rejected');
-    const failures = rejected.length;
-    lastError = failures ? String(rejected[0].reason && rejected[0].reason.message || 'network error') : '';
-
-    render(servers, failures);
-    lastChecked = new Date();
-
-    const wait = failures === NAMES.length ? 60 * 1000 : REFRESH_MS;
-    nextCheck = Date.now() + wait;
-    setTimeout(refresh, wait);
-    tick();
+    try {
+      const res = await fetch('status.json?t=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (!lastData || data.checked !== lastData.checked) render(data);
+      lastData = data;
+      updateFooter(false);
+    } catch (e) {
+      if (lastData) {
+        updateFooter(true);
+      } else {
+        $('main').replaceChildren(el('div', 'message error', 'Couldn’t load server status (' + e.message + '). Trying again in a minute.'));
+        $('summary').textContent = '';
+      }
+    }
   }
-
-  function tick() {
-    if (!lastChecked) return;
-    const secs = Math.max(0, Math.round((nextCheck - Date.now()) / 1000));
-    const m = Math.floor(secs / 60), s = String(secs % 60).padStart(2, '0');
-    $('updated').textContent = 'Last checked ' +
-      lastChecked.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) +
-      ' · next check in ' + m + ':' + s;
-  }
-  setInterval(tick, 1000);
 
   refresh();
+  setInterval(refresh, POLL_MS);
 </script>
 </body>
 </html>
