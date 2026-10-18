@@ -2,26 +2,26 @@ name: Update server status
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "23 * * * *"
   push:
     branches: [main]
+    paths:
+      - "scripts/**"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
+  actions: write
 
 concurrency:
-  group: pages
+  group: server-status
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  check:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -31,15 +31,25 @@ jobs:
 
       - run: pip install "mcstatus==11.1.1"
 
-      - name: Check servers
+      - name: Check servers every 2 minutes
         run: |
-          mkdir -p site
-          cp index.html site/
-          python scripts/check_status.py site/status.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          end=$((SECONDS + 50 * 60))
+          last_push=-9999
+          while [ "$SECONDS" -lt "$end" ]; do
+            python scripts/check_status.py status.json
+            if [ -n "$(git status --porcelain -- status.json)" ] && [ $((SECONDS - last_push)) -ge 360 ]; then
+              git add status.json
+              git commit -q -m "Update server status"
+              git pull -q --rebase origin main
+              git push -q origin HEAD:main && last_push=$SECONDS
+            fi
+            sleep 120
+          done
 
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Start the next run
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run status.yml --ref main

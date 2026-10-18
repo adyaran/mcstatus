@@ -134,7 +134,6 @@
 
 <script>
   const POLL_MS = 60 * 1000;
-  const STALE_MIN = 20;
 
   const $ = (id) => document.getElementById(id);
   let lastData = null;
@@ -182,16 +181,11 @@
 
   function updateFooter(fetchFailed) {
     if (!lastData) return;
-    const checked = new Date(lastData.checked);
-    const ageMin = (Date.now() - checked.getTime()) / 60000;
-    $('updated').textContent = 'Last checked ' +
-      checked.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) +
-      ' · updates about every 5 min';
-    $('note').textContent = fetchFailed
-      ? 'Couldn’t load the latest status, showing the last one'
-      : ageMin > STALE_MIN
-        ? 'Status is ' + Math.round(ageMin) + ' minutes old, the checker may be delayed'
-        : '';
+    const changed = new Date(lastData.checked);
+    $('updated').textContent = 'Last change ' +
+      changed.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) +
+      ' · servers checked every 2 min';
+    $('note').textContent = fetchFailed ? 'Couldn’t load the latest status, showing the last one' : '';
   }
 
   async function refresh() {

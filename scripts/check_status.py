@@ -38,13 +38,21 @@ async def check(name):
 
 async def main(out_path):
     results = await asyncio.gather(*(check(n) for n in NAMES))
+    try:
+        with open(out_path, encoding="utf-8") as f:
+            previous = json.load(f).get("servers")
+    except (OSError, ValueError):
+        previous = None
+    online = [r["name"] for r in results if r["online"]]
+    if results == previous:
+        print(f"no change ({len(online)} online)")
+        return
     data = {
         "checked": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "servers": results,
     }
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(data, f, separators=(",", ":"))
-    online = [r["name"] for r in results if r["online"]]
     print(f"{len(online)} online: {', '.join(online) or 'none'}")
 
 
