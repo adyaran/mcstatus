@@ -143,10 +143,12 @@
     'Cod'
   ];
   const REFRESH_MS = 2 * 60 * 1000;
+  const CONCURRENCY = 5;
 
   const $ = (id) => document.getElementById(id);
   let nextCheck = 0;
   let lastChecked = null;
+  let lastError = '';
 
   async function check(name) {
     const host = name.toLowerCase() + DOMAIN;
@@ -175,7 +177,7 @@
     main.replaceChildren();
 
     if (failures === NAMES.length) {
-      main.append(el('div', 'message error', 'Couldn’t reach the status API — will retry shortly.'));
+      main.append(el('div', 'message error', 'Couldn’t reach the status API (' + lastError + '). Trying again in a minute.'));
     } else if (servers.length === 0) {
       main.append(el('div', 'message', 'No servers online right now'));
     } else {
@@ -205,21 +207,40 @@
     );
 
     $('note').textContent = failures > 0 && failures < NAMES.length
-      ? failures + ' server' + (failures === 1 ? '' : 's') + ' didn’t respond to the status check'
+      ? failures + ' server' + (failures === 1 ? '' : 's') + ' didn’t respond to the status check (' + lastError + ')'
       : '';
   }
 
+  async function checkAll() {
+    const results = new Array(NAMES.length);
+    let next = 0;
+    async function worker() {
+      while (next < NAMES.length) {
+        const i = next++;
+        try {
+          results[i] = { status: 'fulfilled', value: await check(NAMES[i]) };
+        } catch (e) {
+          results[i] = { status: 'rejected', reason: e };
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    return results;
+  }
+
   async function refresh() {
-    const results = await Promise.allSettled(NAMES.map(check));
+    const results = await checkAll();
     const servers = results
       .filter(r => r.status === 'fulfilled' && r.value)
       .map(r => r.value);
-    const failures = results.filter(r => r.status === 'rejected').length;
+    const rejected = results.filter(r => r.status === 'rejected');
+    const failures = rejected.length;
+    lastError = failures ? String(rejected[0].reason && rejected[0].reason.message || 'network error') : '';
 
     render(servers, failures);
     lastChecked = new Date();
 
-    const wait = failures === NAMES.length ? 30 * 1000 : REFRESH_MS;
+    const wait = failures === NAMES.length ? 60 * 1000 : REFRESH_MS;
     nextCheck = Date.now() + wait;
     setTimeout(refresh, wait);
     tick();
